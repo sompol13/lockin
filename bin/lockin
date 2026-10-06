@@ -1,0 +1,77 @@
+#!/bin/zsh
+# lockin — focus timer for the terminal with macOS notifications.
+
+VERSION=1.0.0
+state="${TMPDIR:-/tmp}/lockin.state"
+
+usage() {
+  echo "usage: lockin [minutes] | lockin status | lockin stop" >&2
+}
+
+case "${1:-}" in
+  -v|--version)
+    echo "lockin ${VERSION}"
+    exit 0
+    ;;
+  -h|--help)
+    usage 2>&1
+    exit 0
+    ;;
+  status|stop)
+    if [[ -f $state ]] && read -r pid rest < "$state" && kill -0 "$pid" 2>/dev/null; then
+      now=$(date +%s)
+      left=$(( rest - now ))
+      (( left < 0 )) && left=0
+      if [[ $1 == stop ]]; then
+        kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+        rm -f "$state"
+        echo "😞 $(( (left + 59) / 60 ))m left — Unfinished work follows you home."
+      else
+        printf "🔒 %dm %02ds left — One exception can become a habit.\n" $(( left / 60 )) $(( left % 60 ))
+      fi
+      exit 0
+    fi
+    rm -f "$state"
+    exit 1
+    ;;
+esac
+
+minutes="${1:-50}"
+if [[ $minutes != <-> ]] || (( minutes == 0 )); then
+  usage
+  exit 1
+fi
+
+if [[ -f $state ]] && read -r pid rest < "$state" && kill -0 "$pid" 2>/dev/null; then
+  echo "⚠️  Already locked in — run 'lockin stop' first."
+  exit 1
+fi
+rm -f "$state"
+
+emojis=(🚀 🔒 ⚡️ 🎯 🔥 💪 🛠️ 🧠)
+start_msgs=(
+  "Many done beats one perfect." "B+ on time > A+ never." "First version, not final."
+  "Make it bad, then better." "Perfectionism is fear of judgment." "It's ugly, but it works."
+  "You can improve it later." "Build for users, not engineers." "Perfect code is expensive."
+)
+end_msgs=("That's a wrap." "Done is done." "Enough for now." "Ship it as is.")
+
+emoji="${emojis[RANDOM % ${#emojis[@]} + 1]}"
+start="${start_msgs[RANDOM % ${#start_msgs[@]} + 1]}"
+end="${end_msgs[RANDOM % ${#end_msgs[@]} + 1]}"
+
+end_at=$(( $(date +%s) + minutes * 60 ))
+
+# Background timer; on TERM (`lockin stop`) it also kills its sleep.
+(
+  trap 'kill $sleep_pid 2>/dev/null; exit' TERM
+  sleep "${minutes}m" &
+  sleep_pid=$!
+  wait $sleep_pid
+  osascript -e "display notification \"${end}\" with title \"lockin\""
+  rm -f "$state"
+) >/dev/null 2>&1 &!
+
+print -r -- "$! $end_at" > "$state"
+
+echo "${emoji} Locked in for ${minutes} minutes — ${start}"
